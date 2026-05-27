@@ -83,15 +83,6 @@ export type StorageInitOptions = {
 
 export type BrowserFile = { arrayBuffer(): Promise<ArrayBuffer>; name: string; type?: string };
 
-export type UploadArgs = {
-  file: BrowserFile;
-};
-
-export type RemoveInput = {
-  path: string;
-  key: string;
-};
-
 export type UploadResult = {
   bucket: string;
   key: string;
@@ -169,8 +160,7 @@ export function init(options: StorageInitOptions) {
     };
   }
 
-  async function upload(args: UploadArgs): Promise<UploadResult> {
-    const { file } = args;
+  async function upload(file: BrowserFile): Promise<UploadResult> {
     const normalized = await normalizeUploadFile(file);
     const extension = normalized.filename ? getExtension(normalized.filename) : "";
 
@@ -216,10 +206,7 @@ export function init(options: StorageInitOptions) {
     };
   }
 
-  async function remove(input: RemoveInput): Promise<void> {
-    const config = getPathConfig(normalizedPaths, input.path);
-    const key = ensureKeyInsideDatedPrefix(config.prefix, input.key);
-
+  async function remove(key: string): Promise<void> {
     await client.send(
       new DeleteObjectCommand({
         Bucket: bucket,
