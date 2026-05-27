@@ -41,8 +41,23 @@ await storage.remove(result.key);
 
 ### `init(options)`
 스토리지 인스턴스를 생성합니다.
-- `options.s3`: `S3ClientConfig` (AWS SDK v3) + `bucket`
-- `options.categories`: `{ [categoryName]: [allowedExtensions] }`
+
+- **`options.s3`**: `@aws-sdk/client-s3`의 `S3ClientConfig` + `bucket` 필수 포함.
+- **`options.categories`**: 카테고리명과 허용할 확장자들을 매핑한 객체입니다.
+
+#### `categories` 설정 예시
+```ts
+{
+  images: ["jpg", "jpeg", "png", "webp"], // 'images' 카테고리 설정
+  docs: ["pdf", "txt", "md"]              // 'docs' 카테고리 설정
+}
+```
+
+#### 동작 상세
+1. **경로 라우팅**: 파일 확장자가 어느 카테고리에 속하는지 확인 후, 해당 카테고리 명을 S3의 `prefix`(폴더 경로)로 자동 사용합니다.
+2. **확장자 정의**: 위 예시처럼 확장자는 점(`.`) 없이 배열 형태로 나열합니다 (대소문자 무시).
+3. **중복 정책**: 특정 확장자가 여러 카테고리에 등록된 경우, 먼저 정의된 카테고리가 우선합니다.
+4. **거부**: 정의되지 않은 확장자의 파일은 `StorageValidationError`와 함께 업로드가 차단됩니다.
 
 ### `storage.upload(file)`
 브라우저 `File` 객체를 업로드합니다 (엄격한 검증).
