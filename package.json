@@ -1,0 +1,38 @@
+{
+  "name": "secure-s3-storage",
+  "version": "1.0.0",
+  "description": "S3-backed storage module with automatic file validation",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "keywords": [
+    "s3",
+    "storage",
+    "secure",
+    "upload",
+    "typescript"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1054.0",
+    "file-type": "^22.0.1",
+    "mime-types": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
+  }
+}
