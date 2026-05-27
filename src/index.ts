@@ -75,9 +75,11 @@ const DANGEROUS_EXTENSIONS = new Set([
 const TEXT_EXTENSIONS = new Set(["csv", "json", "md", "txt", "yml", "yaml"]);
 
 export type StorageInitOptions = {
-  s3: S3ClientConfig & {
-    bucket: string;
-  };
+  bucket: string;
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  sessionToken?: string;
+} & Omit<S3ClientConfig, "credentials"> & {
   categories: Record<string, string[]>;
 };
 
@@ -92,6 +94,7 @@ export type UploadResult = {
 };
 
 export type Storage = ReturnType<typeof init>;
+type PathConfig = { prefix: string; allowedExtensions: Set<string> };
 
 export class StorageValidationError extends Error {
   constructor(message: string) {
@@ -101,9 +104,43 @@ export class StorageValidationError extends Error {
 }
 
 export function init(options: StorageInitOptions) {
-  const { bucket, ...s3Config } = options.s3;
-  const client = new S3Client(s3Config);
-  const normalizedPaths = normalizePathConfigs(options.categories);
+  const {
+    bucket,
+    categories,
+    accessKeyId,
+    secretAccessKey,
+    sessionToken,
+    ...s3Config
+  } = options;
+
+  const normalizedAccessKeyId = typeof accessKeyId === "string" ? accessKeyId.trim() : undefined;
+  const normalizedSecretAccessKey =
+    typeof secretAccessKey === "string" ? secretAccessKey.trim() : undefined;
+  const normalizedSessionToken = typeof sessionToken === "string" ? sessionToken.trim() : undefined;
+
+  const hasAccessKeyId = typeof normalizedAccessKeyId === "string" && normalizedAccessKeyId.length > 0;
+  const hasSecretAccessKey =
+    typeof normalizedSecretAccessKey === "string" && normalizedSecretAccessKey.length > 0;
+
+  if (hasAccessKeyId !== hasSecretAccessKey) {
+    throw new StorageValidationError(
+      "accessKeyId and secretAccessKey must be provided together.",
+    );
+  }
+
+  const client = new S3Client({
+    ...s3Config,
+    ...(hasAccessKeyId && hasSecretAccessKey
+      ? {
+          credentials: {
+            accessKeyId: normalizedAccessKeyId,
+            secretAccessKey: normalizedSecretAccessKey,
+            ...(normalizedSessionToken ? { sessionToken: normalizedSessionToken } : {}),
+          },
+        }
+      : {}),
+  });
+  const normalizedPaths = normalizePathConfigs(categories);
   const region = s3Config.region || 'us-east-1';
   const extensionToPath = new Map<string, string>();
   for (const [name, cfg] of Object.entries(normalizedPaths)) {
@@ -132,7 +169,7 @@ export function init(options: StorageInitOptions) {
       throw new StorageValidationError(`Files with .${extension} extension are blocked.`);
     }
 
-    if (!config.allowedExtensions.includes(extension)) {
+    if (!config.allowedExtensions.has(extension)) {
       throw new StorageValidationError(`.${extension} is not allowed for this storage path.`);
     }
 
@@ -207,19 +244,22 @@ export function init(options: StorageInitOptions) {
   }
 
   async function remove(key: string): Promise<void> {
+    const normalizedKey = normalizeObjectKeyInput(key);
+
     await client.send(
       new DeleteObjectCommand({
         Bucket: bucket,
-        Key: key,
+        Key: normalizedKey,
       }),
     );
   }
 
   function getUrl(key: string) {
+    const normalizedKey = normalizeObjectKeyInput(key);
     const endpoint = region === 'us-east-1'
       ? `https://${bucket}.s3.amazonaws.com`
       : `https://${bucket}.s3.${region}.amazonaws.com`;
-    return `${endpoint}/${encodeObjectKey(key)}`;
+    return `${endpoint}/${encodeObjectKey(normalizedKey)}`;
   }
 
   return {
@@ -232,20 +272,20 @@ export function init(options: StorageInitOptions) {
 
 function normalizePathConfigs(
   categories: Record<string, string[]>,
-): Record<string, { prefix: string; allowedExtensions: string[] }> {
+): Record<string, PathConfig> {
   return Object.fromEntries(
     Object.entries(categories).map(([name, extensions]) => [
       name,
       {
-        prefix: name,
-        allowedExtensions: extensions.map(normalizeExtension),
+        prefix: normalizeCategoryPrefix(name),
+        allowedExtensions: new Set(extensions.map(normalizeExtension)),
       },
     ]),
   );
 }
 
 function getPathConfig(
-  paths: Record<string, { prefix: string; allowedExtensions: string[] }>,
+  paths: Record<string, PathConfig>,
   path: string,
 ) {
   const config = paths[path];
@@ -256,7 +296,7 @@ function getPathConfig(
 }
 
 async function resolveUploadTarget(input: {
-  allowedExtensions: string[];
+  allowedExtensions: Set<string>;
   body: Buffer;
   requestedFilename?: string;
   sourceFilename?: string;
@@ -279,7 +319,7 @@ async function resolveUploadTarget(input: {
     throw new StorageValidationError(`Files with .${extension} extension are blocked.`);
   }
 
-  if (!input.allowedExtensions.includes(extension)) {
+  if (!input.allowedExtensions.has(extension)) {
     throw new StorageValidationError(`.${extension} is not allowed for this storage path.`);
   }
 
@@ -327,23 +367,12 @@ function buildObjectKey(prefix: string, filename: string, customKey?: string) {
     throw new StorageValidationError("A valid filename or key is required.");
   }
 
-  const normalizedTarget = stripLeadingSlash(target);
-  if (normalizedTarget.includes("..")) {
-    throw new StorageValidationError("Object key must not contain path traversal segments.");
-  }
-
+  const normalizedTarget = normalizeObjectKeyInput(target);
   return ensureKeyInsidePrefix(prefix, normalizedTarget);
 }
 
 function ensureKeyInsidePrefix(prefix: string, key: string) {
-  const normalizedKey = stripLeadingSlash(key.trim());
-  if (!normalizedKey) {
-    throw new StorageValidationError("Object key is required.");
-  }
-
-  if (normalizedKey.includes("..")) {
-    throw new StorageValidationError("Object key must not contain path traversal segments.");
-  }
+  const normalizedKey = normalizeObjectKeyInput(key);
 
   if (!prefix) {
     return normalizedKey;
@@ -356,25 +385,26 @@ function ensureKeyInsidePrefix(prefix: string, key: string) {
   return `${prefix}/${normalizedKey}`;
 }
 
-function ensureKeyInsideDatedPrefix(prefix: string, key: string) {
-  const normalizedKey = stripLeadingSlash(key.trim());
-  if (!normalizedKey) {
+function normalizeCategoryPrefix(prefix: string) {
+  const normalizedPrefix = normalizeObjectKeyInput(prefix);
+  if (normalizedPrefix === ".") {
+    throw new StorageValidationError("Category prefix must not be a current-directory segment.");
+  }
+  return normalizedPrefix;
+}
+
+function normalizeObjectKeyInput(key: string) {
+  const collapsedKey = stripLeadingSlash(key.trim().replace(/\\/g, "/")).replace(/\/+/g, "/");
+  if (!collapsedKey) {
     throw new StorageValidationError("Object key is required.");
   }
 
-  if (normalizedKey.includes("..")) {
-    throw new StorageValidationError("Object key must not contain path traversal segments.");
+  const segments = collapsedKey.split("/");
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    throw new StorageValidationError("Object key contains invalid path segments.");
   }
 
-  if (isKeyInsideDatedPrefix(prefix, normalizedKey)) {
-    return normalizedKey;
-  }
-
-  if (normalizedKey === prefix || normalizedKey.startsWith(`${prefix}/`)) {
-    return `${getDatePrefix()}/${normalizedKey}`;
-  }
-
-  return `${getDatePrefix()}/${prefix}/${normalizedKey}`;
+  return segments.join("/");
 }
 
 function stripLeadingSlash(value: string) {
@@ -437,18 +467,6 @@ function isLikelyUtf8Text(buffer: Buffer) {
 
 function buildGeneratedFilename(extension: string) {
   return `${randomUUID()}.${extension}`;
-}
-
-function isKeyInsideDatedPrefix(prefix: string, key: string) {
-  const firstSlashIndex = key.indexOf("/");
-  if (firstSlashIndex === -1) {
-    return false;
-  }
-
-  const datePart = key.slice(0, firstSlashIndex);
-  const rest = key.slice(firstSlashIndex + 1);
-
-  return /^\d{4}-\d{2}-\d{2}$/.test(datePart) && rest.startsWith(`${prefix}/`);
 }
 
 function getDatePrefix() {
