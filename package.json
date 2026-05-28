@@ -1,6 +1,6 @@
 {
   "name": "secure-s3-storage",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "S3-backed storage module with automatic file validation",
   "type": "module",
   "main": "dist/index.js",
