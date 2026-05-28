@@ -90,10 +90,15 @@ export type UploadResult = {
   key: string;
   filename: string;
   extension: string;
-  contentType?: string;
+  contentType: string;
 };
 
-export type Storage = ReturnType<typeof init>;
+export type Storage = {
+  put(path: string, file: Buffer, contentType?: string): Promise<UploadResult>;
+  upload(file: BrowserFile): Promise<UploadResult>;
+  remove(key: string): Promise<void>;
+  getUrl(key: string): string;
+};
 type PathConfig = { prefix: string; allowedExtensions: Set<string> };
 
 export class StorageValidationError extends Error {
@@ -103,7 +108,7 @@ export class StorageValidationError extends Error {
   }
 }
 
-export function init(options: StorageInitOptions) {
+export function initStorage(options: StorageInitOptions): Storage {
   const {
     bucket,
     categories,
@@ -177,7 +182,8 @@ export function init(options: StorageInitOptions) {
     const datePrefix = getDatePrefix();
     const prefixWithDate = `${datePrefix}/${config.prefix}`;
     const key = buildObjectKey(prefixWithDate, filename);
-    const finalContentType = contentType ?? detected?.mime ?? getContentTypeFromFilename(filename);
+    const finalContentType =
+      contentType ?? detected?.mime ?? getContentTypeFromFilename(filename) ?? "application/octet-stream";
 
     await client.send(
       new PutObjectCommand({
@@ -354,7 +360,10 @@ async function resolveUploadTarget(input: {
     return {
       extension,
       filename: buildGeneratedFilename(extension),
-      contentType: input.sourceContentType ?? getContentTypeFromFilename(`file.${extension}`),
+      contentType:
+        input.sourceContentType ??
+        getContentTypeFromFilename(`file.${extension}`) ??
+        "application/octet-stream",
     };
   }
 

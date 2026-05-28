@@ -11,10 +11,10 @@ npm install secure-s3-storage
 ## Quick Start
 
 ```ts
-import { init } from "secure-s3-storage";
+import { initStorage, type Storage, type BrowserFile, type UploadResult } from "secure-s3-storage";
 import { readFile } from "node:fs/promises";
 
-const storage = init({
+const storage: Storage = initStorage({
   bucket: "my-bucket",
   region: "ap-northeast-2",
   accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
@@ -25,7 +25,15 @@ const storage = init({
   },
 });
 
-const result = await storage.upload(file);
+const source = await readFile("./photo.png");
+const file: BrowserFile = {
+  name: "photo.png",
+  type: "image/png",
+  arrayBuffer: async () =>
+    source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength),
+};
+
+const result: UploadResult = await storage.upload(file);
 
 const body = await readFile("./photo.png");
 await storage.put("images", body, "image/png");
@@ -36,7 +44,7 @@ await storage.remove(result.key);
 If you use temporary AWS credentials, pass `sessionToken` as well.
 
 ```ts
-const storage = init({
+const storage = initStorage({
   bucket: "my-bucket",
   region: "ap-northeast-2",
   accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
@@ -51,7 +59,7 @@ const storage = init({
 
 ## API
 
-### `init(options)`
+### `initStorage(options)`
 
 Creates a storage instance.
 
@@ -126,6 +134,6 @@ Return value from `storage.upload()` and `storage.put()`.
   key: string;
   filename: string;
   extension: string;
-  contentType?: string;
+  contentType: string;
 }
 ```
