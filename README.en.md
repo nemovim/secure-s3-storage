@@ -1,6 +1,6 @@
 # secure-s3-storage
 
-S3-backed file upload module with content validation, category-based paths, UUID filenames, and date-based (`YYYY-MM-DD`) object keys.
+S3-backed file upload module with content validation, category-based paths, UUID filenames, and category-first object keys in the form `<category-prefix>/YYYY/MM/DD/<uuid>.<ext>`.
 
 ## Install
 
@@ -85,6 +85,8 @@ Behavior:
 3. Unlisted extensions are rejected with `StorageValidationError`.
 4. If the same extension appears in multiple categories, the first one wins.
 
+Generated keys look like `images/2026/06/09/550e8400-e29b-41d4-a716-446655440000.png`.
+
 ### `storage.upload(file)`
 
 Uploads a browser `File`.
@@ -100,11 +102,11 @@ Uploads a server-side `Buffer`.
 
 ### `storage.remove(key)`
 
-Deletes an S3 object by full object key.
+Deletes an S3 object by the generated object key returned from `upload()` or `put()`.
 
 ### `storage.getUrl(key)`
 
-Builds the public URL for an object key.
+Builds the public URL for the generated object key returned from `upload()` or `put()`.
 
 ## Validation And Errors
 

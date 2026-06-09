@@ -179,9 +179,8 @@ export function initStorage(options: StorageInitOptions): Storage {
     }
 
     const filename = buildGeneratedFilename(extension);
-    const datePrefix = getDatePrefix();
-    const prefixWithDate = `${datePrefix}/${config.prefix}`;
-    const key = buildObjectKey(prefixWithDate, filename);
+    const datedPrefix = buildDatedPrefix(config.prefix);
+    const key = buildObjectKey(datedPrefix, filename);
     const finalContentType =
       contentType ?? detected?.mime ?? getContentTypeFromFilename(filename) ?? "application/octet-stream";
 
@@ -227,9 +226,8 @@ export function initStorage(options: StorageInitOptions): Storage {
       sourceContentType: normalized.contentType,
     });
 
-    const datePrefix = getDatePrefix();
-    const prefixWithDate = `${datePrefix}/${config.prefix}`;
-    const key = buildObjectKey(prefixWithDate, resolved.filename);
+    const datedPrefix = buildDatedPrefix(config.prefix);
+    const key = buildObjectKey(datedPrefix, resolved.filename);
 
     await client.send(
       new PutObjectCommand({
@@ -250,7 +248,7 @@ export function initStorage(options: StorageInitOptions): Storage {
   }
 
   async function remove(key: string): Promise<void> {
-    const normalizedKey = normalizeObjectKeyInput(key);
+    const normalizedKey = normalizeStoredObjectKeyInput(key);
 
     await client.send(
       new DeleteObjectCommand({
@@ -261,7 +259,7 @@ export function initStorage(options: StorageInitOptions): Storage {
   }
 
   function getUrl(key: string) {
-    const normalizedKey = normalizeObjectKeyInput(key);
+    const normalizedKey = normalizeStoredObjectKeyInput(key);
     const endpoint = region === 'us-east-1'
       ? `https://${bucket}.s3.amazonaws.com`
       : `https://${bucket}.s3.${region}.amazonaws.com`;
@@ -416,6 +414,29 @@ function normalizeObjectKeyInput(key: string) {
   return segments.join("/");
 }
 
+function normalizeStoredObjectKeyInput(key: string) {
+  const normalizedKey = normalizeObjectKeyInput(key);
+  const segments = normalizedKey.split("/");
+
+  if (segments.length < 5) {
+    throw new StorageValidationError(
+      "Object key must match <category-prefix>/YYYY/MM/DD/<filename>.",
+    );
+  }
+
+  const year = segments[segments.length - 4];
+  const month = segments[segments.length - 3];
+  const day = segments[segments.length - 2];
+
+  if (!/^\d{4}$/.test(year) || !/^(0[1-9]|1[0-2])$/.test(month) || !/^(0[1-9]|[12]\d|3[01])$/.test(day)) {
+    throw new StorageValidationError(
+      "Object key must match <category-prefix>/YYYY/MM/DD/<filename>.",
+    );
+  }
+
+  return normalizedKey;
+}
+
 function stripLeadingSlash(value: string) {
   return value.replace(/^\/+/, "");
 }
@@ -478,10 +499,14 @@ function buildGeneratedFilename(extension: string) {
   return `${randomUUID()}.${extension}`;
 }
 
-function getDatePrefix() {
+function buildDatedPrefix(prefix: string) {
+  return `${prefix}/${getDatePath()}`;
+}
+
+function getDatePath() {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const date = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${date}`;
+  return `${year}/${month}/${date}`;
 }

@@ -2,7 +2,7 @@
 
 [English README](./README.en.md)
 
-S3 기반 파일 업로드 모듈입니다. 파일 내용을 검증하고, 카테고리별 경로로 업로드하며, UUID 파일명과 날짜 기반(`YYYY-MM-DD`) object key를 생성합니다.
+S3 기반 파일 업로드 모듈입니다. 파일 내용을 검증하고, 카테고리별 경로로 업로드하며, `<category-prefix>/YYYY/MM/DD/<uuid>.<ext>` 형태의 object key를 생성합니다.
 
 ## Install
 
@@ -87,6 +87,8 @@ const storage = initStorage({
 3. 허용되지 않은 확장자는 `StorageValidationError`와 함께 차단됩니다.
 4. 같은 확장자가 여러 카테고리에 있으면 먼저 정의한 카테고리를 사용합니다.
 
+생성되는 key 예시는 `images/2026/06/09/550e8400-e29b-41d4-a716-446655440000.png` 입니다.
+
 ### `storage.upload(file)`
 
 브라우저 `File` 객체를 업로드합니다.
@@ -102,11 +104,11 @@ const storage = initStorage({
 
 ### `storage.remove(key)`
 
-저장된 전체 object key를 받아 S3 객체를 삭제합니다.
+`upload()` 또는 `put()`이 반환한 생성된 object key를 받아 S3 객체를 삭제합니다.
 
 ### `storage.getUrl(key)`
 
-object key 기준으로 공개 URL을 생성합니다.
+`upload()` 또는 `put()`이 반환한 생성된 object key 기준으로 공개 URL을 생성합니다.
 
 ## Validation And Errors
 
