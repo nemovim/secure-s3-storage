@@ -2,142 +2,144 @@
 
 [English README](./README.en.md)
 
-S3 기반 파일 업로드 모듈입니다. 파일 내용을 검증하고, 카테고리별 경로로 업로드하며, `<category-prefix>/YYYY/MM/DD/<uuid>.<ext>` 형태의 object key를 생성합니다.
+S3 호환 스토리지를 위한 파일 업로드 모듈입니다.
 
-## Install
+- 애플리케이션 코드는 유지하고 환경변수만 바꿔 AWS S3, Cloudflare R2,
+  Supabase Storage 사이를 전환합니다.
+- 파일 내용과 확장자를 자동으로 비교해 잘못되거나 위험한 파일을 차단합니다.
+- category별 허용 확장자를 지정해 업로드 가능한 파일 형식을 강제합니다.
+- 파일명을 UUID로 바꾸고 날짜별 경로에 저장합니다.
+- 업로드, 삭제, 공개 URL 생성만으로 간단하게 사용할 수 있습니다.
+
+생성되는 object key:
+
+```text
+<category>/YYYY/MM/DD/<uuid>.<ext>
+```
+
+## 설치
 
 ```bash
 npm install secure-s3-storage
 ```
 
-## Quick Start
+## 사용법
 
 ```ts
-import { initStorage, type Storage, type BrowserFile, type UploadResult } from "secure-s3-storage";
 import { readFile } from "node:fs/promises";
+import { initStorage } from "secure-s3-storage";
 
-const storage: Storage = initStorage({
-  bucket: "my-bucket",
-  region: "ap-northeast-2",
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+const storage = initStorage({
+  bucket: process.env.STORAGE_BUCKET!,
+  endpoint: process.env.STORAGE_ENDPOINT!,
+  publicBaseUrl: process.env.STORAGE_PUBLIC_BASE_URL!,
+  region: process.env.STORAGE_REGION!,
+  accessKeyId: process.env.STORAGE_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.STORAGE_SECRET_ACCESS_KEY!,
+  sessionToken: process.env.STORAGE_SESSION_TOKEN || undefined,
   categories: {
     images: ["jpg", "jpeg", "png", "webp"],
     documents: ["pdf", "txt", "md"],
   },
 });
 
-const source = await readFile("./photo.png");
-const file: BrowserFile = {
-  name: "photo.png",
-  type: "image/png",
-  arrayBuffer: async () =>
-    source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength),
-};
+const uploaded = await storage.put(
+  "images",
+  await readFile("./avatar.png"),
+  "image/png",
+);
 
-const result: UploadResult = await storage.upload(file);
+console.log(uploaded.key);
+console.log(storage.getUrl(uploaded.key));
 
-const body = await readFile("./photo.png");
-await storage.put("images", body, "image/png");
-
-await storage.remove(result.key);
+await storage.remove(uploaded.key);
 ```
 
-임시 AWS credential을 쓰는 경우에는 `sessionToken`도 함께 넣으면 됩니다.
+`endpoint`와 `publicBaseUrl`에는 bucket까지 포함된 정확한 base URL을 입력합니다.
+API endpoint와 공개 URL은 provider에 따라 다를 수 있습니다.
 
-```ts
-const storage = initStorage({
-  bucket: "my-bucket",
-  region: "ap-northeast-2",
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  sessionToken: process.env.AWS_SESSION_TOKEN!,
-  categories: {
-    images: ["jpg", "jpeg", "png", "webp"],
-    documents: ["pdf", "txt", "md"],
-  },
-});
+## Provider 설정
+
+애플리케이션 코드는 바꾸지 않고 다음 환경변수만 교체합니다.
+
+### AWS S3
+
+```dotenv
+STORAGE_BUCKET=example-assets
+STORAGE_ENDPOINT=https://example-assets.s3.ap-northeast-2.amazonaws.com
+STORAGE_PUBLIC_BASE_URL=https://example-assets.s3.ap-northeast-2.amazonaws.com
+STORAGE_REGION=ap-northeast-2
+STORAGE_ACCESS_KEY_ID=replace-with-aws-access-key-id
+STORAGE_SECRET_ACCESS_KEY=replace-with-aws-secret-access-key
+```
+
+### Cloudflare R2
+
+```dotenv
+STORAGE_BUCKET=example-assets
+STORAGE_ENDPOINT=https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/example-assets
+STORAGE_PUBLIC_BASE_URL=https://files.example.com
+STORAGE_REGION=auto
+STORAGE_ACCESS_KEY_ID=replace-with-r2-access-key-id
+STORAGE_SECRET_ACCESS_KEY=replace-with-r2-secret-access-key
+```
+
+### Supabase Storage
+
+Supabase dashboard에서 S3 protocol을 활성화한 뒤 표시되는 region과 access key를
+사용합니다. 공개 URL은 public bucket에서만 접근할 수 있습니다.
+
+```dotenv
+STORAGE_BUCKET=public-assets
+STORAGE_ENDPOINT=https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3/public-assets
+STORAGE_PUBLIC_BASE_URL=https://abcdefghijklmnopqrst.supabase.co/storage/v1/object/public/public-assets
+STORAGE_REGION=ap-northeast-1
+STORAGE_ACCESS_KEY_ID=replace-with-supabase-s3-access-key-id
+STORAGE_SECRET_ACCESS_KEY=replace-with-supabase-s3-secret-access-key
 ```
 
 ## API
 
-### `initStorage(options)`
-
-스토리지 인스턴스를 생성합니다.
-
-- `bucket`: S3 버킷 이름
-- `region`: S3 리전
-- `accessKeyId` / `secretAccessKey`: AWS key입니다. 둘 중 하나만 넣으면 에러가 발생합니다.
-- `sessionToken`: 임시 AWS credential을 사용할 때만 필요합니다.
-- `categories`: 카테고리 이름과 허용할 확장자 목록입니다.
-
-`categories` 예시:
+### 업로드
 
 ```ts
-{
-  images: ["jpg", "jpeg", "png", "webp"],
-  documents: ["pdf", "txt", "md"],
-}
+await storage.upload(file);
+await storage.put(category, buffer, contentType);
 ```
 
-동작 방식:
+- `upload()`은 브라우저 `File`과 호환되는 객체를 업로드합니다.
+- `put()`은 서버의 `Buffer`를 지정한 category에 업로드합니다.
+- 두 함수 모두 파일을 검증하고 `UploadResult`를 반환합니다.
 
-1. 파일 확장자를 기준으로 업로드할 카테고리를 결정합니다.
-2. 카테고리 이름이 S3 key prefix로 사용되며, 유효한 key path segment 형태여야 합니다.
-3. 허용되지 않은 확장자는 `StorageValidationError`와 함께 차단됩니다.
-4. 같은 확장자가 여러 카테고리에 있으면 먼저 정의한 카테고리를 사용합니다.
-
-생성되는 key 예시는 `images/2026/06/09/550e8400-e29b-41d4-a716-446655440000.png` 입니다.
-
-### `storage.upload(file)`
-
-브라우저 `File` 객체를 업로드합니다.
-
-- 반환값: `UploadResult`
-- `file`: `{ arrayBuffer(): Promise<ArrayBuffer>; name: string; type?: string }`
-
-### `storage.put(path, body, contentType?)`
-
-서버에서 `Buffer`를 직접 업로드합니다.
-
-- 반환값: `UploadResult`
-
-### `storage.remove(key)`
-
-`upload()` 또는 `put()`이 반환한 생성된 object key를 받아 S3 객체를 삭제합니다.
-
-### `storage.getUrl(key)`
-
-`upload()` 또는 `put()`이 반환한 생성된 object key 기준으로 공개 URL을 생성합니다.
-
-## Validation And Errors
-
-- 파일 내용과 확장자를 비교해 검증합니다.
-- 실행 파일, 스크립트 같은 위험한 확장자는 차단합니다.
-- `upload()`는 파일 내용과 파일명까지 함께 보고 더 엄격하게 검증합니다.
-- `remove()`와 `getUrl()`은 빈 key를 막고, 경로 구분자와 중복 슬래시를 정규화하며, `.` 및 `..` 경로 세그먼트를 검증합니다.
-
-검증에 실패하면 `StorageValidationError`가 발생합니다.
-
-주요 에러 상황:
-
-- 알 수 없는 카테고리
-- 허용되지 않은 확장자
-- 파일 내용과 확장자가 맞지 않는 경우
-- key가 비어 있거나 잘못된 path segment 또는 path traversal이 포함된 경우
-
-## Output Types
-
-### `UploadResult`
-
-`storage.upload()`와 `storage.put()`의 반환값입니다.
+### 삭제
 
 ```ts
-{
+await storage.remove(key);
+```
+
+### 공개 URL 생성
+
+```ts
+const url = storage.getUrl(key);
+```
+
+`getUrl()`은 `publicBaseUrl`과 인코딩된 key를 결합합니다. Private bucket을 위한
+signed URL은 생성하지 않습니다.
+
+## 검증 규칙
+
+- 실제 파일 내용과 확장자를 함께 확인합니다.
+- category에 등록되지 않은 확장자를 차단합니다.
+- 실행 파일과 script 계열 확장자를 차단합니다.
+- 잘못된 경로 segment와 path traversal을 차단합니다.
+- 검증 실패 시 `StorageValidationError`가 발생합니다.
+
+```ts
+type UploadResult = {
   bucket: string;
   key: string;
   filename: string;
   extension: string;
   contentType: string;
-}
+};
 ```

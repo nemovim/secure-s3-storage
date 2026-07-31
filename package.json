@@ -1,10 +1,13 @@
 {
   "name": "secure-s3-storage",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "S3-backed storage module with automatic file validation",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=22"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -15,7 +18,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test"
   },
   "keywords": [
     "s3",

@@ -1,6 +1,19 @@
 # secure-s3-storage
 
-S3-backed file upload module with content validation, category-based paths, UUID filenames, and category-first object keys in the form `<category-prefix>/YYYY/MM/DD/<uuid>.<ext>`.
+File uploads for S3-compatible storage.
+
+- Switch between AWS S3, Cloudflare R2, and Supabase Storage by changing
+  environment variables instead of application code.
+- Validate file contents and extensions automatically.
+- Enforce allowed extensions for each category.
+- Store files under organized date-based paths with UUID filenames.
+- Keep the public API focused on upload, removal, and public URL generation.
+
+Generated object keys:
+
+```text
+<category>/YYYY/MM/DD/<uuid>.<ext>
+```
 
 ## Install
 
@@ -8,134 +21,123 @@ S3-backed file upload module with content validation, category-based paths, UUID
 npm install secure-s3-storage
 ```
 
-## Quick Start
+## Usage
 
 ```ts
-import { initStorage, type Storage, type BrowserFile, type UploadResult } from "secure-s3-storage";
 import { readFile } from "node:fs/promises";
+import { initStorage } from "secure-s3-storage";
 
-const storage: Storage = initStorage({
-  bucket: "my-bucket",
-  region: "ap-northeast-2",
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+const storage = initStorage({
+  bucket: process.env.STORAGE_BUCKET!,
+  endpoint: process.env.STORAGE_ENDPOINT!,
+  publicBaseUrl: process.env.STORAGE_PUBLIC_BASE_URL!,
+  region: process.env.STORAGE_REGION!,
+  accessKeyId: process.env.STORAGE_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.STORAGE_SECRET_ACCESS_KEY!,
+  sessionToken: process.env.STORAGE_SESSION_TOKEN || undefined,
   categories: {
     images: ["jpg", "jpeg", "png", "webp"],
     documents: ["pdf", "txt", "md"],
   },
 });
 
-const source = await readFile("./photo.png");
-const file: BrowserFile = {
-  name: "photo.png",
-  type: "image/png",
-  arrayBuffer: async () =>
-    source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength),
-};
+const uploaded = await storage.put(
+  "images",
+  await readFile("./avatar.png"),
+  "image/png",
+);
 
-const result: UploadResult = await storage.upload(file);
+console.log(uploaded.key);
+console.log(storage.getUrl(uploaded.key));
 
-const body = await readFile("./photo.png");
-await storage.put("images", body, "image/png");
-
-await storage.remove(result.key);
+await storage.remove(uploaded.key);
 ```
 
-If you use temporary AWS credentials, pass `sessionToken` as well.
+`endpoint` and `publicBaseUrl` are exact bucket base URLs. They may be different
+because an API endpoint is not always a publicly accessible object URL.
 
-```ts
-const storage = initStorage({
-  bucket: "my-bucket",
-  region: "ap-northeast-2",
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  sessionToken: process.env.AWS_SESSION_TOKEN!,
-  categories: {
-    images: ["jpg", "jpeg", "png", "webp"],
-    documents: ["pdf", "txt", "md"],
-  },
-});
+## Provider configuration
+
+Keep the application code unchanged and replace only these environment values.
+
+### AWS S3
+
+```dotenv
+STORAGE_BUCKET=example-assets
+STORAGE_ENDPOINT=https://example-assets.s3.ap-northeast-2.amazonaws.com
+STORAGE_PUBLIC_BASE_URL=https://example-assets.s3.ap-northeast-2.amazonaws.com
+STORAGE_REGION=ap-northeast-2
+STORAGE_ACCESS_KEY_ID=replace-with-aws-access-key-id
+STORAGE_SECRET_ACCESS_KEY=replace-with-aws-secret-access-key
+```
+
+### Cloudflare R2
+
+```dotenv
+STORAGE_BUCKET=example-assets
+STORAGE_ENDPOINT=https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/example-assets
+STORAGE_PUBLIC_BASE_URL=https://files.example.com
+STORAGE_REGION=auto
+STORAGE_ACCESS_KEY_ID=replace-with-r2-access-key-id
+STORAGE_SECRET_ACCESS_KEY=replace-with-r2-secret-access-key
+```
+
+### Supabase Storage
+
+Enable the S3 protocol and copy the region and access keys shown in the Supabase
+dashboard. The public URL is accessible only for a public bucket.
+
+```dotenv
+STORAGE_BUCKET=public-assets
+STORAGE_ENDPOINT=https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3/public-assets
+STORAGE_PUBLIC_BASE_URL=https://abcdefghijklmnopqrst.supabase.co/storage/v1/object/public/public-assets
+STORAGE_REGION=ap-northeast-1
+STORAGE_ACCESS_KEY_ID=replace-with-supabase-s3-access-key-id
+STORAGE_SECRET_ACCESS_KEY=replace-with-supabase-s3-secret-access-key
 ```
 
 ## API
 
-### `initStorage(options)`
-
-Creates a storage instance.
-
-- `bucket`: S3 bucket name
-- `region`: S3 region
-- `accessKeyId` / `secretAccessKey`: AWS keys. Passing only one throws an error.
-- `sessionToken`: Only needed for temporary AWS credentials.
-- `categories`: Mapping of category names to allowed file extensions
-
-Example `categories`:
+### Upload
 
 ```ts
-{
-  images: ["jpg", "jpeg", "png", "webp"],
-  documents: ["pdf", "txt", "md"],
-}
+await storage.upload(file);
+await storage.put(category, buffer, contentType);
 ```
 
-Behavior:
+- `upload()` accepts a browser `File`-compatible object.
+- `put()` uploads a server-side `Buffer` to a selected category.
+- Both validate the file and return an `UploadResult`.
 
-1. The file extension decides which category to use.
-2. The category name becomes the S3 key prefix and must be a valid key path segment.
-3. Unlisted extensions are rejected with `StorageValidationError`.
-4. If the same extension appears in multiple categories, the first one wins.
-
-Generated keys look like `images/2026/06/09/550e8400-e29b-41d4-a716-446655440000.png`.
-
-### `storage.upload(file)`
-
-Uploads a browser `File`.
-
-- Returns: `UploadResult`
-- `file`: `{ arrayBuffer(): Promise<ArrayBuffer>; name: string; type?: string }`
-
-### `storage.put(path, body, contentType?)`
-
-Uploads a server-side `Buffer`.
-
-- Returns: `UploadResult`
-
-### `storage.remove(key)`
-
-Deletes an S3 object by the generated object key returned from `upload()` or `put()`.
-
-### `storage.getUrl(key)`
-
-Builds the public URL for the generated object key returned from `upload()` or `put()`.
-
-## Validation And Errors
-
-- Validates file content against the file extension.
-- Blocks dangerous executable and script-like extensions.
-- `upload()` validates file content and filename together.
-- `remove()` and `getUrl()` validate empty keys, normalize separators and repeated slashes, and reject `.` and `..` path segments.
-
-Validation failures throw `StorageValidationError`.
-
-Common error cases:
-
-- Unknown category
-- Disallowed extension
-- File content does not match the extension
-- Empty key, invalid path segments, or path traversal in a key
-
-## Output Types
-
-### `UploadResult`
-
-Return value from `storage.upload()` and `storage.put()`.
+### Remove
 
 ```ts
-{
+await storage.remove(key);
+```
+
+### Build a public URL
+
+```ts
+const url = storage.getUrl(key);
+```
+
+`getUrl()` joins `publicBaseUrl` with the encoded key. It does not create signed
+URLs for private buckets.
+
+## Validation
+
+- Checks file contents and extensions together.
+- Rejects extensions not configured for the selected category.
+- Blocks executable and script-like extensions.
+- Rejects invalid path segments and path traversal.
+- Throws `StorageValidationError` when validation fails.
+
+```ts
+type UploadResult = {
   bucket: string;
   key: string;
   filename: string;
   extension: string;
   contentType: string;
-}
+};
 ```

@@ -2,7 +2,6 @@ import {
   DeleteObjectCommand,
   PutObjectCommand,
   S3Client,
-  type S3ClientConfig,
 } from "@aws-sdk/client-s3";
 import { randomUUID } from "node:crypto";
 import { fileTypeFromBuffer } from "file-type";
@@ -76,10 +75,12 @@ const TEXT_EXTENSIONS = new Set(["csv", "json", "md", "txt", "yml", "yaml"]);
 
 export type StorageInitOptions = {
   bucket: string;
-  accessKeyId?: string;
-  secretAccessKey?: string;
+  endpoint: string | URL;
+  publicBaseUrl: string | URL;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
   sessionToken?: string;
-} & Omit<S3ClientConfig, "credentials"> & {
   categories: Record<string, string[]>;
 };
 
@@ -112,41 +113,47 @@ export function initStorage(options: StorageInitOptions): Storage {
   const {
     bucket,
     categories,
+    endpoint,
+    region,
     accessKeyId,
     secretAccessKey,
     sessionToken,
-    ...s3Config
+    publicBaseUrl,
   } = options;
 
-  const normalizedAccessKeyId = typeof accessKeyId === "string" ? accessKeyId.trim() : undefined;
+  const normalizedBucket = typeof bucket === "string" ? bucket.trim() : "";
+  if (!normalizedBucket) {
+    throw new StorageValidationError("bucket is required.");
+  }
+
+  const normalizedRegion = typeof region === "string" ? region.trim() : "";
+  if (!normalizedRegion) {
+    throw new StorageValidationError("region must not be empty.");
+  }
+
+  const normalizedEndpoint = normalizeBaseUrl(endpoint, "endpoint");
+  const publicObjectBaseUrl = normalizeBaseUrl(publicBaseUrl, "publicBaseUrl");
+  const normalizedAccessKeyId = typeof accessKeyId === "string" ? accessKeyId.trim() : "";
   const normalizedSecretAccessKey =
-    typeof secretAccessKey === "string" ? secretAccessKey.trim() : undefined;
+    typeof secretAccessKey === "string" ? secretAccessKey.trim() : "";
   const normalizedSessionToken = typeof sessionToken === "string" ? sessionToken.trim() : undefined;
 
-  const hasAccessKeyId = typeof normalizedAccessKeyId === "string" && normalizedAccessKeyId.length > 0;
-  const hasSecretAccessKey =
-    typeof normalizedSecretAccessKey === "string" && normalizedSecretAccessKey.length > 0;
-
-  if (hasAccessKeyId !== hasSecretAccessKey) {
+  if (!normalizedAccessKeyId || !normalizedSecretAccessKey) {
     throw new StorageValidationError(
-      "accessKeyId and secretAccessKey must be provided together.",
+      "accessKeyId and secretAccessKey must not be empty.",
     );
   }
 
   const client = new S3Client({
-    ...s3Config,
-    ...(hasAccessKeyId && hasSecretAccessKey
-      ? {
-          credentials: {
-            accessKeyId: normalizedAccessKeyId,
-            secretAccessKey: normalizedSecretAccessKey,
-            ...(normalizedSessionToken ? { sessionToken: normalizedSessionToken } : {}),
-          },
-        }
-      : {}),
+    region: normalizedRegion,
+    bucketEndpoint: true,
+    credentials: {
+      accessKeyId: normalizedAccessKeyId,
+      secretAccessKey: normalizedSecretAccessKey,
+      ...(normalizedSessionToken ? { sessionToken: normalizedSessionToken } : {}),
+    },
   });
   const normalizedPaths = normalizePathConfigs(categories);
-  const region = s3Config.region || 'us-east-1';
   const extensionToPath = new Map<string, string>();
   for (const [name, cfg] of Object.entries(normalizedPaths)) {
     for (const ext of cfg.allowedExtensions) {
@@ -186,7 +193,7 @@ export function initStorage(options: StorageInitOptions): Storage {
 
     await client.send(
       new PutObjectCommand({
-        Bucket: bucket,
+        Bucket: normalizedEndpoint,
         Key: key,
         Body: file,
         ContentType: finalContentType,
@@ -194,7 +201,7 @@ export function initStorage(options: StorageInitOptions): Storage {
     );
 
     return {
-      bucket,
+      bucket: normalizedBucket,
       key,
       filename,
       extension,
@@ -231,7 +238,7 @@ export function initStorage(options: StorageInitOptions): Storage {
 
     await client.send(
       new PutObjectCommand({
-        Bucket: bucket,
+        Bucket: normalizedEndpoint,
         Key: key,
         Body: normalized.body,
         ContentType: resolved.contentType,
@@ -239,7 +246,7 @@ export function initStorage(options: StorageInitOptions): Storage {
     );
 
     return {
-      bucket,
+      bucket: normalizedBucket,
       key,
       filename: resolved.filename,
       extension: resolved.extension,
@@ -252,18 +259,16 @@ export function initStorage(options: StorageInitOptions): Storage {
 
     await client.send(
       new DeleteObjectCommand({
-        Bucket: bucket,
+        Bucket: normalizedEndpoint,
         Key: normalizedKey,
       }),
     );
   }
 
-  function getUrl(key: string) {
+  function getUrl(key: string): string {
     const normalizedKey = normalizeStoredObjectKeyInput(key);
-    const endpoint = region === 'us-east-1'
-      ? `https://${bucket}.s3.amazonaws.com`
-      : `https://${bucket}.s3.${region}.amazonaws.com`;
-    return `${endpoint}/${encodeObjectKey(normalizedKey)}`;
+    const encodedKey = encodeObjectKey(normalizedKey);
+    return `${publicObjectBaseUrl}/${encodedKey}`;
   }
 
   return {
@@ -272,6 +277,28 @@ export function initStorage(options: StorageInitOptions): Storage {
     remove,
     getUrl,
   };
+}
+
+function normalizeBaseUrl(value: string | URL, optionName: "endpoint" | "publicBaseUrl"): string {
+  let url: URL;
+  try {
+    url = value instanceof URL ? new URL(value.href) : new URL(value);
+  } catch {
+    throw new StorageValidationError(`${optionName} must be a valid absolute URL.`);
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new StorageValidationError(`${optionName} must use http or https.`);
+  }
+
+  if (url.username || url.password || url.search || url.hash) {
+    throw new StorageValidationError(
+      `${optionName} must not contain credentials, a query string, or a fragment.`,
+    );
+  }
+
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url.href.replace(/\/$/, "");
 }
 
 function normalizePathConfigs(
