@@ -1,5 +1,7 @@
 # secure-s3-storage
 
+[![npm version](https://img.shields.io/npm/v/secure-s3-storage.svg)](https://www.npmjs.com/package/secure-s3-storage)
+
 [English README](./README.en.md)
 
 S3 호환 스토리지를 위한 파일 업로드 모듈입니다.

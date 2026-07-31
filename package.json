@@ -2,6 +2,14 @@
   "name": "secure-s3-storage",
   "version": "3.0.0",
   "description": "S3-backed storage module with automatic file validation",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nemovim/secure-s3-storage.git"
+  },
+  "homepage": "https://github.com/nemovim/secure-s3-storage#readme",
+  "bugs": {
+    "url": "https://github.com/nemovim/secure-s3-storage/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

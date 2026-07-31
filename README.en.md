@@ -1,5 +1,7 @@
 # secure-s3-storage
 
+[![npm version](https://img.shields.io/npm/v/secure-s3-storage.svg)](https://www.npmjs.com/package/secure-s3-storage)
+
 File uploads for S3-compatible storage.
 
 - Switch between AWS S3, Cloudflare R2, and Supabase Storage by changing
