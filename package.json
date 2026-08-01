@@ -1,7 +1,7 @@
 {
   "name": "secure-s3-storage",
-  "version": "3.0.1",
-  "description": "S3-backed storage module with automatic file validation",
+  "version": "4.0.0",
+  "description": "Validated uploads for S3-compatible object storage",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nemovim/secure-s3-storage.git"
@@ -27,7 +27,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test"
+    "test": "npm run build && node --test",
+    "prepack": "npm run build"
   },
   "keywords": [
     "s3",
@@ -39,6 +40,7 @@
   "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1054.0",
+    "@aws-sdk/s3-request-presigner": "^3.1054.0",
     "file-type": "^22.0.1",
     "mime-types": "^3.0.2"
   },
